@@ -10,31 +10,37 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def authenticate_user():
     creds = None
-    # Check if token.json exists
-    if os.path.exists("token.json"):
+    # Check for credentials in Streamlit Secrets (for cloud deployment)
+    if "google_auth_token" in st.secrets:
+        from google.auth import impersonated_credentials, default
+        from google.auth.transport.requests import Request
+        
+        # Load credentials from the TOML data structure in Streamlit Secrets
+        token_info = st.secrets["google_auth_token"]
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+    
+    # Check for local token.json (for local development/initial setup)
+    elif os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    # If no valid credentials, prompt login
+
+    # If credentials exist but are expired, attempt refresh
+    if creds and creds.expired and creds.refresh_token:
+        # Note: Request() is imported at the top of the file
+        creds.refresh(Request())
+
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        # Save the credentials for the next run
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
+        st.error("Authentication failed. Google Calendar features disabled.")
+        return None
+        
     return build("calendar", "v3", credentials=creds)
 
-def login(username): #NI SAJE BUAT INDICATOR AND SIGN IN BUTTON
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-        st.sidebar.success("Google Account: Logged In") #INDICATOR
+# ALSO UPDATE login() function to avoid running authenticate_user() on button press
+def login(username):
+    # This function is now simplified to only check for credentials
+    if os.path.exists("token.json") or "google_auth_token" in st.secrets:
+        st.sidebar.success("Google Account: Logged In (via Secrets)")
     else:
-        if st.sidebar.button("Login", type="primary"): # SIGN IN BUTTON
-            authenticate_user()
-            st.sidebar.success("Google Account: Log in Successful") #INDICATOR
+        st.sidebar.error("Google Account: Not Logged In. Secrets missing.")
 
     if os.path.exists("user_face.npy"):
         st.sidebar.success(f"FaceID: {username}")
