@@ -1,53 +1,62 @@
 import cv2
-import time
 from deepface import DeepFace
 import streamlit as st
+import time
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import av
 
-def detect_emotion():
-    face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-    cap = cv2.VideoCapture(0)
+class EmotionDetector(VideoTransformerBase):
+    def __init__(self):
+        # Load the cascade classifier inside the class
+        self.face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+        self.last_emotion = "Neutral"
 
-    last_emotion = None
-    last_record_time = time.time()  # Initialize the timer
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to grab frame")
-            break
-
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    def transform(self, frame):
+        # Convert the frame (av.VideoFrame) to a numpy array (cv2 image)
+        img = frame.to_ndarray(format="bgr24")
+        gray_frame = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
         for (x, y, w, h) in faces:
-            face_roi = frame[y:y + h, x:x + w]
-
+            face_roi = img[y:y + h, x:x + w]
             try:
-                result = DeepFace.analyze(face_roi, actions=['emotion'], enforce_detection=False)
-                current_emotion = result[0]['dominant_emotion']
-
-                # Check if 1 second has passed since the last recording
-                if time.time() - last_record_time >= 0.5:
-                    last_emotion = current_emotion
-                    last_record_time = time.time()  # Reset the timer
+                # Analyze the emotion (silent=True prevents console spam)
+                result = DeepFace.analyze(face_roi, actions=['emotion'], enforce_detection=False, silent=True)
+                self.last_emotion = result[0]['dominant_emotion']
 
                 # Draw rectangle and label
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(frame, current_emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(img, self.last_emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-            except Exception as e:
-                print(f"Error analyzing face: {e}")
+            except Exception:
+                # Fallback if DeepFace fails to analyze a face
+                cv2.putText(img, "No face found", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
-        cv2.imshow('Real-time Emotion Detection', frame)
+        # Return the processed frame
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+# New function to display the Streamlit component
+def start_emotion_detection_web():
+    # Use session state to store the result of the detection
+    if 'detected_emotion' not in st.session_state:
+        st.session_state.detected_emotion = "Neutral"
 
-    cap.release()
-    cv2.destroyAllWindows()
+    # webrtc_streamer starts the camera and runs the EmotionDetector transformer
+    ctx = webrtc_streamer(
+        key="emotion-detection-key",
+        video_processor_factory=EmotionDetector,
+        rtc_configuration={
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        }
+    )
 
-    # Return the last detected emotion
-    return last_emotion
+    # Display the current emotion detected below the video stream
+    if ctx.video_processor:
+        st.session_state.detected_emotion = ctx.video_processor.last_emotion
+        st.subheader(f"Current Emotion: {st.session_state.detected_emotion}")
+        display_emotion_feedback(st.session_state.detected_emotion)
+    else:
+        st.write("Click 'Start' above to begin emotion detection.")
 
 # Emotion-to-recommendation mapping
 emotion_recommendations = {

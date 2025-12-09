@@ -1,0 +1,9 @@
+# Python Virtual Environment
+.venv/
+# Specific Files
+credentials.json
+token.json
+# Streamlit Secrets (if used)
+.streamlit/secrets.toml
+# Any other specific secrets file
+secrets.toml

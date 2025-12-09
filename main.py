@@ -1,50 +1,73 @@
 import streamlit as st
-import pyttsx3
-## import requests, pygame
-## from t2s import text_to_speech
+import json
 from PIL import Image
-from datetime import datetime, timedelta
-from auth import authenticate_user, login
-from add_event import add_event_to_calendar, submit_event
-from study_timetable import fetch_upcoming_events, create_study_timetable, display_study_timetable
+from auth import login
+from add_event import submit_event
 from streamlit_option_menu import option_menu
-from emotion_utils import detect_emotion, display_emotion_feedback
-from dotenv import load_dotenv
-import google.generativeai as ai
+from emotion_utils import start_emotion_detection_web, display_emotion_feedback
+from aura import showaura, homepage, startfeg, generatett
+from setup_face_id import mainfaceid
 import os
+from streamlit_lottie import st_lottie
+from dotenv import load_dotenv # Keep this for local development fallback
+import google.generativeai as ai
 
 # Configure the API Key
-load_dotenv()
-GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+try:
+    # 1. Try to get key from Streamlit Secrets (for cloud deployment)
+    GENAI_API_KEY = st.secrets["general"]["GENAI_API_KEY"]
+    
+except (KeyError, AttributeError):
+    # 2. Fallback to local .env file for development
+    load_dotenv()
+    GENAI_API_KEY = os.getenv("GENAI_API_KEY")
+
 if not GENAI_API_KEY:
-    raise ValueError("API Key not found! Please set GOOGLE_GENAI_API_KEY.")
+    raise ValueError("API Key not found! Please set it in Streamlit Secrets or your local .env file.")
 
 ai.configure(api_key=GENAI_API_KEY)
 
-# Initialize Streamlit app
-st.set_page_config(page_title="AURA Project", page_icon="logo.png", layout="wide")
+def load_lottiefile(filepath: str):
+    with open(filepath, "r") as f:
+        return json.load(f)
 
-# Sidebar navigation
-logo = Image.open("logo.png")
+# Initialize session state for username
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+st.set_page_config(
+        page_title="AURA",
+        page_icon="🤖",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+logo = Image.open("auralogo_glow.png")
 st.sidebar.image(logo, use_container_width=True)
+st.sidebar.text(" ")
+st.sidebar.text(" ")
 
-# Sidebar configuration
 with st.sidebar:
     selected_section = option_menu(
-        menu_title="Main",  # Title of the sidebar menu
+        menu_title="Main",
         options=[
             "AURA Home",
-            "Test Our Product",
-        ],  # Menu options
+            "FaceID Setup",
+            "Your Calendar",
+            "Emotion Detection",
+            "AURA ChatBot",
+        ],
         icons=[
             "house",
+            "person-bounding-box",
+            "calendar-event",
+            "emoji-smile-fill",
             "person-fill",
-        ],  # Menu icons (use https://icons.getbootstrap.com/)
-        menu_icon="list",  # Icon for the sidebar menu
-        default_index=0,  # Default selected item
+        ],
+        menu_icon="list",
+        default_index=0,
         styles={
             "menu_title": {"font-size": "15px"},
-            "container": {"padding": "5px", "background-color": "#000000"},
+            "container": {"padding": "5px", "background-color": "#0e1117"},
             "icon": {"color": "white", "font-size": "20px"},
             "nav-link": {
                 "font-size": "16px",
@@ -56,39 +79,89 @@ with st.sidebar:
         },
     )
 
-# Section routing based on selection
 if selected_section == "AURA Home":
-    st.title("AURA: Pembantu Pintar Pembelajaran Peribadi")
-    st.markdown("""
-    **AURA** is an innovative project aimed at improving time management and productivity for students.
+    st.sidebar.markdown("### Useful Links")
+    st.sidebar.markdown(
+        """
+        - [📄 Documentation](https://example.com)
+        - [💬 Support](https://example.com/support)
+        - [⭐ Rate Us](https://example.com/rate)
+        """
+    )
+    homepage()
 
-    - **Add Event to Calendar**: Simplifies event management by integrating with Google Calendar.
-    - **Emotion Detection**: Uses real-time face recognition to detect emotions (Coming soon!).
-    - **Schedule Maker**: Generates personalized study plans based on upcoming exams and assignments in your Google Calendar.
+elif selected_section == "FaceID Setup":
+    mainfaceid()
 
-    Our goal is to provide students with a smarter and more efficient way to plan their daily activities.
-    """)
+elif selected_section == "Your Calendar":
+    st.sidebar.link_button("Open Google Calendar", "https://calendar.google.com/")
+    login(st.session_state.username)
 
-elif selected_section == "Test Our Product":
-    choice = st.selectbox("Select Functions:",["None","Emotion Detection","Add Event","Create Timetable","Chatbot"])
+    # Center the title using Streamlit HTML and CSS
+    st.markdown(
+        "<h1 style='text-align: center;'>Your Calendar 📅</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
 
-    if choice == "Add Event":
-        st.title("Add Event to Google Calendar")
-        st.markdown("Use the form below to add an event to your Google Calendar.")
+    # Create two columns for subheaders
+    col1, col2 = st.columns(2)
+
+    # Add content to the left column
+    with col1:
         submit_event()
-    
-    if choice == "Emotion Detection":
-        st.header("Emotion Detection")
-        if st.button("Start Emotion Detection"):
-            st.write("Press 'q' to stop detection.")
-            detected_emotion = detect_emotion()
-            display_emotion_feedback(detected_emotion)
 
-    if choice == "Create Timetable":
-        st.header("Create Timetable")
-        if st.button("Create a Study Timetable"):
-            display_study_timetable()
+    # Add content to the right column
+    with col2:
+        with st.form("create_timetable"):
+            st.header("Create Study Timetable ⏰")
+            st.markdown("Press the button below to start creating your study timetable.")
+            st.markdown("")
+            submitted = st.form_submit_button("Generate Timetable")
 
-    if choice == "Chatbot":
-        st.header("AI Chatbot")
-        st.write("Interact with the AURA Chatbot below:")
+            if submitted:
+                try:
+                    generatett()
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
+
+elif selected_section == "Emotion Detection":
+    st.title("Emotion Detection 😊")
+    st.markdown(
+    """
+    <style>
+    .emotion-btn {
+        background-color: #FFA586;
+        border: none;
+        color: white;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        border-radius: 5px;
+    }
+    .emotion-btn:hover {
+        background-color: #B51A2B;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+    start = st.button("Start Emotion Detection", key="detect")
+    if start:
+        with st.spinner("Detecting your emotion..."):
+            last_emotion = start_emotion_detection_web()
+        display_emotion_feedback(last_emotion)
+
+elif selected_section == "AURA ChatBot":
+    clear = st.sidebar.button("Clear Chat", key="clear")
+    if clear:
+        st.session_state.messages = []
+
+    if os.path.exists("user_face.npy"):
+        login(st.session_state.username) #SIDEBAR AND AUTH
+        showaura(st.session_state.username) 
+        start = st.sidebar.button("Start Aura", key="start")
+        if start:
+            startfeg(st.session_state.username) #START AURA TO DETECT USER AND GREET THEM
+    else:
+        st.error("Please set up your FaceID and enter your nickname in the previous section.")
